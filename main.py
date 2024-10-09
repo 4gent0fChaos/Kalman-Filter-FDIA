@@ -1,6 +1,20 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Kalman filter function
+def kalman_filter(X, P, A, B, U, H, Q, R, Z):
+    # Prediction step
+    X_pred = np.dot(A, X) + np.dot(B, U)
+    P_pred = np.dot(A, np.dot(P, A.T)) + Q
+    
+    # Update step
+    S = np.dot(H, (np.dot(P_pred, H.T)+R))
+    K = np.dot(P_pred, np.dot(H.T, np.linalg.inv(S)))
+
+    X_new = X_pred + np.dot(K, (Z - np.dot(H, X_pred)))
+    P_new = np.dot((np.eye(len(K)) - np.dot(K, H)), P_pred)
+
+    return X_new, P_new
 
 def get_matrices(n):
     Z_n_n = np.zeros((n, n))
@@ -39,9 +53,7 @@ def get_U(n):
             sum_distances += get_desired_distance(n-k, j)
         
         U[k] = K[k] / tau[k] * sum_distances  
-    print(U)
     return U
-
 
 def get_S(i, j):
     if i in I[j]:
@@ -49,7 +61,7 @@ def get_S(i, j):
     return 0
 
 def sgn(i, j):
-    if i>j:
+    if i > j:
         return 1
     return -1
 
@@ -57,10 +69,7 @@ def get_desired_distance(i, j):
     d = 0
     for k in range(min([i, j]), max([i, j])):
         d += li[k] + desired_distance[k]
-    print(i, j, d)
     return -1 * sgn(i, j) * d
-
-
 
 # PLATOON OF 4 CARS(0, 1, 2, 3; 0 LEADER)
 I = [[], [0], [0, 1], [0, 2]]
@@ -71,7 +80,7 @@ vi = np.array([25, 27.8, 22.2, 19.4])
 ai = np.array([0, 2, 3, 2])
 desired_distance = np.array([3, 4, 4])
 
-# Currently im calculating delta manually for testing
+# Currently I'm calculating delta manually for testing
 del_xi = np.array([[-40, -20, -3]])
 del_vi = np.array([[-5.6, -2.8, 2.8]])
 del_ai = np.array([[2, 3, 2]])
@@ -93,7 +102,6 @@ car_0_position = xi[0]
 car_0_velocity = vi[0]
 car_0_acceleration = ai[0]
 
-
 X = np.concatenate((del_xi, del_vi, del_ai), axis=1).transpose()
 X_current = X.copy()
 
@@ -102,11 +110,18 @@ B = [5, 5, 5]
 H = [1, 1, 1]
 tau = [0.5, 0.5, 0.5]
 
-n=3
+n = 3
 C = [len(I[1]), len(I[2]), len(I[3])]
 
 A_matrix, B_matrix = get_matrices(n)
 
+# Kalman Filter Variables
+H_kalman = np.eye(3 * n)
+
+Q = np.eye(3 * n) * 1e-5  # Process noise covariance
+R = np.eye(3 * n) * 1e-5  # Measurement noise covariance
+
+P = np.eye(3 * n) * 1e-5
 
 # Updation loop
 for iter in range(num_of_iter):
@@ -116,9 +131,18 @@ for iter in range(num_of_iter):
 
     U = get_U(n)
 
-    X_cap = np.matmul(A_matrix, X_current) + np.matmul(B_matrix, U)
+    X_cap = np.matmul(A_matrix, X_current) + np.matmul(B_matrix, U)     # Currently using this as measurements
 
-    X_next = X_current + time_step * X_cap
+    # Kalman filter measurement: here we assume the measurement Z to be the current state
+    Z = X_cap.copy()
+
+    # Apply Kalman filter
+    X_new, P = kalman_filter(X_current, P, A_matrix, B_matrix, U, H_kalman, Q, R, Z)
+    
+    # Update X_current with Kalman filter output
+    X_cap = X_new.copy()
+
+    X_current = X_current + time_step * X_cap
 
     # Putting values in array for graph
     car_0[iter][0] = car_0_position
@@ -134,15 +158,12 @@ for iter in range(num_of_iter):
     car_3[iter][1] = car_0_velocity + X_current[3, 0]
     car_3[iter][2] = X_current[6, 0]
 
+    # print(f"Time {iter * time_step:.1f}s: X = \n{X_current}")
+    # print(f"Time {iter * time_step:.1f}s: X = \n{X_new}")
 
-    print(f"Time {iter * time_step:.1f}s: X = \n{X_next}")
-    print(f"Desired distance d20 = {get_desired_distance(3, 0)}:")
-    print(f"Actual distance d20 = {car_3[iter][0] - car_0[iter][0]}:")
-    print("error = ", (car_3[iter][0] - car_0[iter][0]) - get_desired_distance(3, 0))
-
+    
 
 
-    X_current = X_next
 
 plt.figure(figsize=(10, 6))
 plt.plot(time_array, car_0.transpose()[0], label="Car 0 (Leader)", linestyle='-')
