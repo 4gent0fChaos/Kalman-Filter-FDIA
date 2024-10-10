@@ -186,16 +186,16 @@ def simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau, si
     return cars
 
 # Example usage
-N = 5  # Number of cars, you can increase this
+N = 7  # Number of cars, you can increase this
 
 # Initial conditions (generalize for N cars)
-li = np.array([4, 4.4, 3.8, 5.2, 4.4])
-xi = np.array([0, -8, -20, -40, -80])
-vi = np.array([25, 27.8, 22.2, 19.4, 27.8])
-ai = np.array([0, 2, 3, 2, 2])
-desired_distance = np.array([0, 3, 4, 4, 3])
+li = np.array([4, 4.4, 3.8, 5.2, 4.4, 3.8, 4])
+xi = np.array([0, -8, -20, -40, -80, -100, -120])
+vi = np.array([25, 27.8, 22.2, 19.4, 27.8, 22.2, 27.8])
+ai = np.array([0, 2, 3, 2, 2, 3, 3])
+desired_distance = np.array([0, 3, 4, 4, 3, 4, 3])
 
-I = [[], [0], [0, 1], [0, 2], [0, 3]]
+I = [[], [0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5]]
 
 C = []
 for i in I:
