@@ -121,8 +121,12 @@ def simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau, si
 
         X_cap = np.matmul(A_matrix, X_current) + np.matmul(B_matrix, U)
 
+
+        # Currently adding manual noise to the system
+        noise = np.random.normal(0, 0.5, X_cap.shape)
         # Kalman filter measurement: here we assume the measurement Z to be the current state
-        Z = X_cap.copy()
+        Z = X_cap.copy() 
+        Z = Z + noise
 
         # Apply Kalman filter
         X_new, P = kalman_filter(X_current, P, A_matrix, B_matrix, U, H_kalman, Q, R, Z)
@@ -148,7 +152,6 @@ def simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau, si
                 cars[iter][car][1] = car_0_velocity + plot_data[1][N-car-1]  # Velocity
                 cars[iter][car][2] = car_0_acceleration + plot_data[2][N-car-1]  # Acceleration
 
-        print(f"Difference = {cars[iter][0][0] - cars[iter][1][0]}")
 
     plt.figure(figsize=(10, 6))
     for car in range(N):
@@ -207,4 +210,3 @@ H = [1] * N
 tau = [0.5] * N
 
 simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau)
-
