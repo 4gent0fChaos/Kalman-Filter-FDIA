@@ -34,7 +34,7 @@ def simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau, si
     R = np.eye(3 * (N-1)) * 1e-5  # Measurement noise covariance
     P = np.eye(3 * (N-1)) * 0.5  # Initial state covariance
 
-    SNR = 50
+    SNR = 40
 
     car_0_position = xi[0]
     car_0_velocity = vi[0]
@@ -43,9 +43,7 @@ def simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau, si
     
     A_matrix, B_matrix = get_matrices(N, K, B, H, I, C, tau)
 
-    attack_val = 0
-
-    
+    attack_val = 10
 
     # Simulation loop
     for iter in range(num_of_iter):
@@ -53,15 +51,25 @@ def simulate_platoon(N, I, li, xi, vi, ai, desired_distance, C, K, B, H, tau, si
         U = get_U(N, K, I, tau, li, desired_distance) 
 
         Z = np.matmul(A_matrix, X_current) + np.matmul(B_matrix, U)
-
+     
+        Z_noisy = Z.copy()
+        X_noisy = X_current.copy()    
         Z_noisy = add_noise_based_on_snr(Z, SNR) 
-        X_noisy = add_noise_based_on_snr(X_current, SNR)         
+        X_noisy = add_noise_based_on_snr(X_current, SNR)
 
-        plot_noisy = X_noisy.copy().reshape(-1, N-1)
 
+        if current_time > 5 and current_time < 6:
+            Z_noisy[8] += (attack_val / time_step)
+        
+        if current_time > 5.5 and current_time < 6.5:
+            Z_noisy[9] -= (attack_val / time_step)
+
+
+        X_Recieved = X_noisy + time_step * Z_noisy
+        plot_noisy = X_Recieved.copy().reshape(-1, N-1)
         
         # Apply Kalman filter
-        X_new, P = kalman_filter(X_noisy, P, A_matrix, B_matrix, U, H_kalman, Q, R, Z_noisy)
+        X_new, P = kalman_filter_pwls(X_noisy, P, A_matrix, B_matrix, U, H_kalman, Q, R, Z_noisy)
         
         # Update X_current with Kalman filter output
         X_current = X_current + time_step * X_new

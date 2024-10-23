@@ -48,46 +48,61 @@ def kalman_filter(X, P, A, B, U, H, Q, R, Z):
     I = np.eye(P.shape[0])  # Identity matrix of size P
     P_new = np.dot(I - np.dot(K, H), P_pred)
 
-
-    # z_bar = np.vstack((residual, X_pred))
-
-    # H_bar = np.vstack((H, H))
-
-    # # PWLS Iterative Process
-    # w_est = np.vstack((np.zeros((len(residual), 1)), np.ones((len(residual), 1))))  # Start with all weights as 1
-    # eps = 1
-    # X_plus = X_pred.copy()  # Initialize with predicted state
-
-    # Sk = block_diag(R, P_pred)
-
-    # X_new = X_plus
-
-    
-    # while eps > epsilon:
-    #     Z_adj = np.dot(np.diag(w_est.flatten()), z_bar)
-    #     H_adj = np.dot(np.diag(w_est.flatten()), H_bar)
-
-    #     X_old = X_new
-
-    #     M = H_adj.T @ np.linalg.inv(Sk) @ H_adj
-    #     X_new = np.linalg.inv(M) @ (H_adj.T @ np.linalg.inv(Sk) @ Z_adj)
-
-    #     residual_new = z_bar - H_bar @ X_new
-        
-    #     X_plus = X_new.copy()
-
-    #     w_est = np.maximum(np.minimum(np.sqrt(0.5 * lambda_val) / np.abs(residual_new), 1), 0)
-    #     eps = np.linalg.norm(X_old - X_new, np.inf)
-
-
-
-    # Z_adj = np.dot(np.diag(w_est.flatten()), z_bar)
-    # H_adj = np.dot(np.diag(w_est.flatten()), H_bar)
-    # M = H_adj.T @ np.linalg.inv(Sk) @ H_adj
-    # X_new = np.linalg.inv(M) @ (H_adj.T @ np.linalg.inv(Sk) @ Z_adj)
-    # P_new = np.dot((np.eye(len(K)) - np.dot(K, H)), P_pred)
-
     return X_new, P_new
+
+def kalman_filter_pwls(X, P, A, B, U, H, Q, R, Z):
+    epsilon =  1e-5
+    lambda_val = 0.005
+
+    # Prediction step
+    X_pred = np.dot(A, X) + np.dot(B, U)
+    P_pred = np.dot(A, np.dot(P, A.T)) + Q
+
+    Y = Z - np.dot(H, X_pred)
+    
+    # Update step
+    S = np.dot(H, np.dot(P_pred, H.T)) + R
+    K = np.dot(P_pred, np.dot(H.T, np.linalg.inv(S)))
+
+    z_bar = np.vstack((Y, X_pred))
+
+    H_bar = np.vstack((H, H))
+
+    # PWLS Iterative Process
+    w_est = np.vstack((np.zeros((len(Y), 1)), np.ones((len(Y), 1))))  # Start with all weights as 1
+    eps = 1
+    X_plus = X_pred.copy()  # Initialize with predicted state
+
+    Sk = block_diag(R, P_pred)
+
+    X_new = X_plus
+
+    while eps > epsilon:
+        Z_adj = np.dot(np.diag(w_est.flatten()), z_bar)
+        H_adj = np.dot(np.diag(w_est.flatten()), H_bar)
+
+        X_old = X_new
+
+        M = H_adj.T @ np.linalg.inv(Sk) @ H_adj
+        X_new = np.linalg.inv(M) @ (H_adj.T @ np.linalg.inv(Sk) @ Z_adj)
+
+        residual_new = z_bar - H_bar @ X_new
+        
+        X_plus = X_new.copy()
+
+        w_est = np.maximum(np.minimum(np.sqrt(0.5 * lambda_val) / np.abs(residual_new), 1), 0)
+        eps = np.linalg.norm(X_old - X_new, np.inf)
+
+    w_est[w_est < 0.5] = 0
+
+    Z_adj = np.dot(np.diag(w_est.flatten()), z_bar)
+    H_adj = np.dot(np.diag(w_est.flatten()), H_bar)
+    M = H_adj.T @ np.linalg.inv(Sk) @ H_adj
+    X_new = np.linalg.inv(M) @ (H_adj.T @ np.linalg.inv(Sk) @ Z_adj)
+    P_new = np.dot((np.eye(len(K)) - np.dot(K, H)), P_pred)
+    
+    return X_new, P_new
+
 
 
 # Function to dynamically create matrices based on N cars
