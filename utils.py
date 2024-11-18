@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.linalg import block_diag
+import matplotlib.pyplot as plt
 
 def compare_with_threshold(matrix1, matrix2, threshold):
     # Compute the absolute difference between the matrices
@@ -51,7 +52,7 @@ def kalman_filter(X, P, A, B, U, H, Q, R, Z):
     return X_new, P_new
 
 def kalman_filter_pwls(X, P, A, B, U, H, Q, R, Z):
-    epsilon =  1e-5
+    epsilon =  1e-10
     lambda_val = 0.005
 
     # Prediction step
@@ -76,8 +77,9 @@ def kalman_filter_pwls(X, P, A, B, U, H, Q, R, Z):
     Sk = block_diag(R, P_pred)
 
     X_new = X_plus
+    residual_new = z_bar - H_bar @ X_new
 
-    while eps > epsilon:
+    while eps > epsilon and np.linalg.norm(residual_new) > 10:
         Z_adj = np.dot(np.diag(w_est.flatten()), z_bar)
         H_adj = np.dot(np.diag(w_est.flatten()), H_bar)
 
@@ -100,22 +102,27 @@ def kalman_filter_pwls(X, P, A, B, U, H, Q, R, Z):
     M = H_adj.T @ np.linalg.inv(Sk) @ H_adj
     X_new = np.linalg.inv(M) @ (H_adj.T @ np.linalg.inv(Sk) @ Z_adj)
     P_new = np.dot((np.eye(len(K)) - np.dot(K, H)), P_pred)
+
+    res = np.linalg.norm(residual_new)
     
-    return X_new, P_new
+    return X_new, P_new, res
 
 
 
 # Function to dynamically create matrices based on N cars
 def get_matrices(N, K, B, H, I, C, tau):
-    Z_n_n = np.zeros((N-1, N-1))
-    I_n_n = np.eye(N-1)
+    Z_NN = np.zeros((N, N))
+    I_NN = np.eye(N)
 
-    Xi = Z_n_n.copy()
-    Omega = Z_n_n.copy()
-    Lambda = Z_n_n.copy()
+    Z_N = np.zeros((N, 1))
+    Z_n = np.zeros((N-1, 1))
+
+    Xi = Z_NN.copy()
+    Omega = Z_NN.copy()
+    Lambda = Z_NN.copy()
     
-    for i in range(N-1):
-        for j in range(N-1):
+    for i in range(N):
+        for j in range(N):
             if (i == j):
                 Xi[i][j] = -1 * C[N-1-i] * K[N-1-i] / tau[N-1-i]
                 Omega[i][j] = -1 * C[N-1-i] * B[N-1-i] / tau[N-1-i]
@@ -125,23 +132,28 @@ def get_matrices(N, K, B, H, I, C, tau):
                 Xi[i][j] = K[N-1-i] / tau[N-1-i] * S
                 Omega[i][j] = B[N-1-i] / tau[N-1-i] * S
                 Lambda[i][j] = H[N-1-i] / tau[N-1-i] * S
+
+            
+
+    C_matrix = np.zeros((3*N, 1))
+    C_matrix[-1, 0] = 1 
     
     A_matrix = np.block([
-        [Z_n_n, I_n_n, Z_n_n],
-        [Z_n_n, Z_n_n, I_n_n],
+        [Z_NN, I_NN, Z_NN],
+        [Z_NN, Z_NN, I_NN],
         [Xi, Omega, Lambda]
     ])
     B_matrix = np.block([
-        [Z_n_n],
-        [Z_n_n],
-        [I_n_n]
+        [Z_NN],
+        [Z_NN],
+        [I_NN]
     ])
-    
-    return A_matrix, B_matrix
+    return A_matrix, B_matrix, C_matrix
+
 
 # Function to calculate control inputs based on the desired distances
 def get_U(N, K, I, tau, li, desired_distance):
-    U = np.zeros((N-1, 1))
+    U = np.zeros((N, 1))
     for k in range(0, N-1):
         sum_distances = 0
         mat_K = N-k-1
@@ -165,3 +177,92 @@ def get_desired_distance(i, j, li, desired_distance):
     for k in range(min([i, j]), max([i, j])):
         d += li[k] + desired_distance[k+1]
     return -1 * sgn(i, j) * d
+
+def get_beta0(maintain_vel, current_acc, tau0):
+    beta0 = tau0 * maintain_vel + (tau0-1) * current_acc
+    return beta0
+
+def get_delta_vals(xi, vi, ai, N):
+    # Compute deltas (differences between cars and the leader, car 0)
+    xi = ((xi - xi[0]))
+    vi = ((vi - vi[0]))
+    ai = ((ai - ai[0]))
+    return xi, vi, ai
+
+def get_val_from_delta(X_delta, time_step, N, xi, vi, ai, del_xi, del_vi, del_ai):
+    X_delta = X_delta.reshape(-1)
+    new_del_xi = del_xi + time_step * X_delta[: N]
+    new_del_vi = del_vi + time_step * X_delta[N: 2*N]
+    new_del_ai = del_ai + time_step * X_delta[2*N: 3*N]
+
+    new_del_xi, new_del_vi, new_del_ai = new_del_xi[::-1], new_del_vi[::-1], new_del_ai[::-1]
+
+    new_v0 = vi[0] + time_step * ai[0]
+    new_x0 = xi[0] + time_step * vi[0]
+
+    new_xi = new_del_xi + new_x0
+    new_vi = new_del_vi + new_v0
+    new_ai = new_del_ai + ai[0]
+
+    xi = new_xi.copy()
+    vi = new_vi.copy()
+    ai = new_ai.copy()
+
+    return xi, vi, ai
+
+def make_graph(N, time_array, cars, filter_flag, SNR):
+    plt.figure(figsize=(10, 6))
+    for car in range(N):
+        plt.plot(time_array, cars[:, car, 0], label=f"Car {car} (Follower)", linestyle='-')
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Position (m)")
+    if filter_flag:
+        plt.title(f"Position of Cars in Platoon over Time (After filters) ({SNR}db)")
+    else:
+        plt.title(f"Position of Cars in Platoon over Time (Without filters) ({SNR}db)")
+
+    plt.legend()
+    plt.grid(True)
+    if filter_flag:
+        plt.savefig("platoon_positions.png")
+    else:
+        plt.savefig("platoon_positions_filterless.png")
+
+
+    plt.figure(figsize=(10, 6))
+    for car in range(N):
+        plt.plot(time_array, cars[:, car, 1], label=f"Car {car} (Follower)", linestyle='-')
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Velocity (m/s)")
+    if filter_flag:
+        plt.title(f"Velocity of Cars in Platoon over Time (After filters) ({SNR}db)")
+    else:
+        plt.title(f"Velocity of Cars in Platoon over Time (Without filters) ({SNR}db)")
+
+    plt.legend()
+    plt.grid(True)
+    if filter_flag:
+        plt.savefig("platoon_velocities.png")
+    else:
+        plt.savefig("platoon_velocities_filterless.png")
+        
+
+    plt.figure(figsize=(10, 6))
+    for car in range(N):
+        plt.plot(time_array, cars[:, car, 2], label=f"Car {car} (Follower)", linestyle='-')
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Acceleration (m/s2)")
+    if filter_flag:
+        plt.title(f"Acceleration of Cars in Platoon over Time (After filters) ({SNR}db)")
+    else:
+        plt.title(f"Acceleration of Cars in Platoon over Time (Wihtout filters) ({SNR}db)")
+
+    plt.legend()
+    plt.grid(True)
+    if filter_flag:
+        plt.savefig("platoon_accelerations.png")
+    else:
+        plt.savefig("platoon_accelerations_filterless.png")
