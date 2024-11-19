@@ -26,6 +26,8 @@ B = [5] * (N)
 H = [1] * (N)
 tau = [0.5] * (N)
 
+beta_0 = 0
+
 simulation_time=10
 time_step=0.005
 
@@ -33,49 +35,42 @@ num_of_iter = int(simulation_time / time_step)
 time_array = np.arange(0, simulation_time, time_step)
 
 cars = np.zeros((num_of_iter, N, 3))
-cars_nonFilter = np.zeros((num_of_iter, N, 3))
 
 
-xi, vi, ai = xi[:N], vi[:N], ai[:N]
+xi, vi, ai = xi[:N][::-1], vi[:N][::-1], ai[:N][::-1]
 
 A_matrix, B_matrix, C_matrix = get_matrices(N, K, B, H, I, C, tau)
 U = get_U(N, K, I, tau, li, desired_distance)
-print(U)
-F = np.array([0]).reshape((1, 1))
 
-del_xi, del_vi, del_ai = get_delta_vals(xi, vi, ai, N)
-del_xi, del_vi, del_ai = del_xi[::-1], del_vi[::-1], del_ai[::-1]
-
-
-X = np.concatenate((del_xi, del_vi, del_ai)).reshape((-1, 1))
+X = np.concatenate((xi, vi, ai)).reshape((-1, 1))
 X_current = X.copy()
 
 for iter in range(num_of_iter):
-    
+
+    current_time = iter * time_step
+
+    if current_time > 4 and current_time < 6 and beta_0 < 10:
+        beta_0 += 1
+
+    if current_time > 6 and beta_0 > 0:
+        beta_0 -= 1
+
+
+    F = np.array([beta_0/tau[0]]).reshape((1, 1))
+
+
     X_delta = A_matrix@X_current + B_matrix@U + C_matrix@F
 
+    Z_measured = A_matrix@X_current + B_matrix@U + C_matrix@F
 
     X_current = X_current + time_step * X_delta
 
+    # For Plotting    
     X_plot = X_current.copy()
-
-    X_plot = X_plot.reshape(-1)
-    new_del_xi = X_plot[: N]
-    new_del_vi = X_plot[N: 2*N]
-    new_del_ai = X_plot[2*N: 3*N]
-
-    new_del_xi, new_del_vi, new_del_ai = new_del_xi[::-1], new_del_vi[::-1], new_del_ai[::-1]
-
-    new_v0 = vi[0] + time_step * ai[0]
-    new_x0 = xi[0] + time_step * vi[0]
-
-    new_xi = new_del_xi + new_x0
-    new_vi = new_del_vi + new_v0
-    new_ai = new_del_ai + ai[0]
-
-    xi = new_xi.copy()
-    vi = new_vi.copy()
-    ai = new_ai.copy()
+    # xi, vi, ai = get_val_from_delta(X_plot, time_step, N, xi, vi, ai)
+    xi = X_plot[: N].reshape((-1))
+    vi = X_plot[N: 2*N].reshape((-1))
+    ai = X_plot[2*N: 3*N].reshape((-1))
 
 
     for i in range(N):
@@ -84,8 +79,6 @@ for iter in range(num_of_iter):
         cars[iter][i][2] = ai[i]
 
 
-    print(cars[iter])
-    print()
 
-make_graph(N, time_array, cars, filter_flag=True, SNR=-1)
+make_graph(N, time_array, cars, filter_flag=True, SNR=10)
 

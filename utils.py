@@ -189,25 +189,20 @@ def get_delta_vals(xi, vi, ai, N):
     ai = ((ai - ai[0]))
     return xi, vi, ai
 
-def get_val_from_delta(X_delta, time_step, N, xi, vi, ai, del_xi, del_vi, del_ai):
-    X_delta = X_delta.reshape(-1)
-    new_del_xi = del_xi + time_step * X_delta[: N]
-    new_del_vi = del_vi + time_step * X_delta[N: 2*N]
-    new_del_ai = del_ai + time_step * X_delta[2*N: 3*N]
-
+def get_val_from_delta(X_plot, time_step, N, xi, vi, ai):
+    X_plot = X_plot.reshape(-1)
+    new_del_xi = X_plot[: N]
+    new_del_vi = X_plot[N: 2*N]
+    new_del_ai = X_plot[2*N: 3*N]
     new_del_xi, new_del_vi, new_del_ai = new_del_xi[::-1], new_del_vi[::-1], new_del_ai[::-1]
-
     new_v0 = vi[0] + time_step * ai[0]
     new_x0 = xi[0] + time_step * vi[0]
-
     new_xi = new_del_xi + new_x0
     new_vi = new_del_vi + new_v0
     new_ai = new_del_ai + ai[0]
-
     xi = new_xi.copy()
     vi = new_vi.copy()
     ai = new_ai.copy()
-
     return xi, vi, ai
 
 def make_graph(N, time_array, cars, filter_flag, SNR):
@@ -266,3 +261,56 @@ def make_graph(N, time_array, cars, filter_flag, SNR):
         plt.savefig("platoon_accelerations.png")
     else:
         plt.savefig("platoon_accelerations_filterless.png")
+
+class UnknownInputKalmanFilter:
+    def __init__(self, A, B, C, Q, R, P0):
+        """
+        Initializes the Kalman Filter.
+        :param A: State transition matrix
+        :param B: Control input matrix
+        :param C: Unknown input matrix
+        :param Q: Process noise covariance
+        :param R: Measurement noise covariance
+        :param P0: Initial error covariance matrix
+        """
+        self.A = A
+        self.B = B
+        self.C = C
+        self.Q = Q
+        self.R = R
+        self.P = P0
+
+    def predict(self, X, U):
+        """
+        Predicts the next state and error covariance.
+        :param X: Current state estimate
+        :param U: Control input
+        :return: Predicted state estimate
+        """
+        self.X_pred = self.A @ X + self.B @ U
+        self.P = self.A @ self.P @ self.A.T + self.Q
+        return self.X_pred
+
+    def update(self, Z, H):
+        """
+        Updates the state and error covariance based on measurement.
+        :param Z: Measurement vector
+        :param H: Observation matrix
+        :return: Updated state estimate
+        """
+        # Calculate Kalman Gain
+        S = H @ self.P @ H.T + self.R
+        K = self.P @ H.T @ np.linalg.inv(S)
+        
+        # Estimate unknown input F (if C is invertible)
+        residual = Z - H @ self.X_pred
+        if self.C.shape[0] == self.C.shape[1] and np.linalg.det(self.C) != 0:
+            F_est = np.linalg.inv(self.C) @ residual
+        else:
+            F_est = np.zeros((self.C.shape[1], 1))  # Use zero if estimation is not possible
+        
+        # Update state estimate
+        self.X_pred += K @ residual
+        self.P = (np.eye(len(self.P)) - K @ H) @ self.P
+
+        return self.X_pred, F_est
