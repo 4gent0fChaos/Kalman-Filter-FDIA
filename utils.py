@@ -205,112 +205,155 @@ def get_val_from_delta(X_plot, time_step, N, xi, vi, ai):
     ai = new_ai.copy()
     return xi, vi, ai
 
-def make_graph(N, time_array, cars, filter_flag, SNR):
-    plt.figure(figsize=(10, 6))
-    for car in range(N):
-        plt.plot(time_array, cars[:, car, 0], label=f"Car {car} (Follower)", linestyle='-')
 
-    plt.xlabel("Time (s)")
-    plt.ylabel("Position (m)")
-    if filter_flag:
-        plt.title(f"Position of Cars in Platoon over Time (After filters) ({SNR}db)")
-    else:
-        plt.title(f"Position of Cars in Platoon over Time (Without filters) ({SNR}db)")
-
-    plt.legend()
-    plt.grid(True)
-    if filter_flag:
-        plt.savefig("platoon_positions.png")
-    else:
-        plt.savefig("platoon_positions_filterless.png")
-
-
-    plt.figure(figsize=(10, 6))
-    for car in range(N):
-        plt.plot(time_array, cars[:, car, 1], label=f"Car {car} (Follower)", linestyle='-')
-
-    plt.xlabel("Time (s)")
-    plt.ylabel("Velocity (m/s)")
-    if filter_flag:
-        plt.title(f"Velocity of Cars in Platoon over Time (After filters) ({SNR}db)")
-    else:
-        plt.title(f"Velocity of Cars in Platoon over Time (Without filters) ({SNR}db)")
-
-    plt.legend()
-    plt.grid(True)
-    if filter_flag:
-        plt.savefig("platoon_velocities.png")
-    else:
-        plt.savefig("platoon_velocities_filterless.png")
-        
-
-    plt.figure(figsize=(10, 6))
-    for car in range(N):
-        plt.plot(time_array, cars[:, car, 2], label=f"Car {car} (Follower)", linestyle='-')
-
-    plt.xlabel("Time (s)")
-    plt.ylabel("Acceleration (m/s2)")
-    if filter_flag:
-        plt.title(f"Acceleration of Cars in Platoon over Time (After filters) ({SNR}db)")
-    else:
-        plt.title(f"Acceleration of Cars in Platoon over Time (Wihtout filters) ({SNR}db)")
-
-    plt.legend()
-    plt.grid(True)
-    if filter_flag:
-        plt.savefig("platoon_accelerations.png")
-    else:
-        plt.savefig("platoon_accelerations_filterless.png")
-
-class UnknownInputKalmanFilter:
-    def __init__(self, A, B, C, Q, R, P0):
+class ModifiedUIKF:
+    def __init__(self, A, B, C, H, Q, R, P0):
         """
-        Initializes the Kalman Filter.
+        Initialize the Modified UIKF.
         :param A: State transition matrix
         :param B: Control input matrix
         :param C: Unknown input matrix
+        :param H: Observation matrix
         :param Q: Process noise covariance
         :param R: Measurement noise covariance
-        :param P0: Initial error covariance matrix
+        :param P0: Initial error covariance
         """
         self.A = A
         self.B = B
         self.C = C
+        self.H = H
         self.Q = Q
         self.R = R
         self.P = P0
 
     def predict(self, X, U):
         """
-        Predicts the next state and error covariance.
+        Predict the next state and covariance.
         :param X: Current state estimate
         :param U: Control input
         :return: Predicted state estimate
         """
+        # Predict the state
         self.X_pred = self.A @ X + self.B @ U
+        
+        # Predict the error covariance
         self.P = self.A @ self.P @ self.A.T + self.Q
         return self.X_pred
 
-    def update(self, Z, H):
+    def update(self, Z):
         """
-        Updates the state and error covariance based on measurement.
-        :param Z: Measurement vector
-        :param H: Observation matrix
-        :return: Updated state estimate
+        Update the state estimate and unknown input.
+        :param Z: Noisy measurement vector
+        :return: Updated state estimate and estimated unknown input
         """
-        # Calculate Kalman Gain
-        S = H @ self.P @ H.T + self.R
-        K = self.P @ H.T @ np.linalg.inv(S)
+        # Compute residual
+        residual = Z - self.H @ self.X_pred
         
-        # Estimate unknown input F (if C is invertible)
-        residual = Z - H @ self.X_pred
-        if self.C.shape[0] == self.C.shape[1] and np.linalg.det(self.C) != 0:
-            F_est = np.linalg.inv(self.C) @ residual
-        else:
-            F_est = np.zeros((self.C.shape[1], 1))  # Use zero if estimation is not possible
-        
+        # Estimate F using pseudoinverse of C
+        pseudo_inv = np.linalg.pinv(self.C.T @ self.C)
+        F_est = pseudo_inv @ self.C.T @ residual
+
+        # Adjust residual to account for F
+        residual_adjusted = residual - self.C @ F_est
+
+        # Kalman gain
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+
         # Update state estimate
-        self.X_pred += K @ residual
-        self.P = (np.eye(len(self.P)) - K @ H) @ self.P
+        self.X_pred += K @ residual_adjusted
+
+        # Add the effect of the estimated unknown input
+        self.X_pred += self.C @ F_est
+        
+        # Update error covariance
+        self.P = (np.eye(len(self.P)) - K @ self.H) @ self.P
+
+        return self.X_pred, F_est, np.linalg.norm(residual_adjusted)
+
+
+class ModifiedUIKF_pwls:
+    def __init__(self, A, B, C, H, Q, R, P0, lambda_penalty=1.0, threshold=1.0):
+        """
+        Initialize the Modified UIKF with PWLS.
+        :param A: State transition matrix
+        :param B: Control input matrix
+        :param C: Unknown input matrix
+        :param H: Observation matrix
+        :param Q: Process noise covariance
+        :param R: Measurement noise covariance
+        :param P0: Initial error covariance
+        :param lambda_penalty: Regularization parameter for the PWLS
+        :param threshold: Threshold for residual to identify outliers
+        """
+        self.A = A
+        self.B = B
+        self.C = C
+        self.H = H
+        self.Q = Q
+        self.R = R
+        self.P = P0
+        self.lambda_penalty = lambda_penalty
+        self.threshold = threshold
+
+    def predict(self, X, U):
+        """
+        Predict the next state and covariance.
+        :param X: Current state estimate
+        :param U: Control input
+        :return: Predicted state estimate
+        """
+        # Predict the state
+        self.X_pred = self.A @ X + self.B @ U
+        
+        # Predict the error covariance
+        self.P = self.A @ self.P @ self.A.T + self.Q
+        return self.X_pred
+
+    def update(self, Z):
+        """
+        Update the state estimate and unknown input, incorporating PWLS.
+        :param Z: Noisy measurement vector
+        :return: Updated state estimate and estimated unknown input
+        """
+        # Compute residual
+        residual = Z - self.H @ self.X_pred
+        
+        # Estimate F using pseudoinverse of C
+        pseudo_inv = np.linalg.pinv(self.C.T @ self.C)
+        F_est = pseudo_inv @ self.C.T @ residual
+
+        # Adjust residual to account for F
+        residual_adjusted = residual - self.C @ F_est
+
+        # Kalman gain
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+
+        # Update state estimate using the Kalman filter update rule
+        self.X_pred += K @ residual_adjusted
+
+        # Add the effect of the estimated unknown input
+        self.X_pred += self.C @ F_est
+        
+        # Apply PWLS - Penalized Weighted Least Squares
+        # Check residual to adjust the weights
+        weights = np.ones_like(residual_adjusted)
+        for i in range(len(residual_adjusted)):
+            if np.abs(residual_adjusted[i]) > self.threshold:
+                weights[i] = 0.1  # Lower weight for suspected outliers
+            else:
+                weights[i] = 1.0  # Normal weight for reliable measurements
+        
+        # Apply the penalty term to the state update
+        penalty_term = self.lambda_penalty * np.sum(np.square(self.X_pred))  # Regularization
+        self.X_pred -= penalty_term  # Subtract regularization penalty
+
+        # Adjust the residuals using the weighted least squares
+        weighted_residual = weights * residual_adjusted
+        self.X_pred += K @ weighted_residual  # Correct the state estimate
+
+        # Update error covariance
+        self.P = (np.eye(len(self.P)) - K @ self.H) @ self.P
 
         return self.X_pred, F_est
