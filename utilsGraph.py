@@ -69,6 +69,47 @@ def make_graph(N, time_array, cars, SNR):
     plt.grid(True)
     plt.savefig("fig/platoon_accelerations.png")
 
+
+def make_graph_filterless(N, time_array, cars, SNR):
+    plt.figure(figsize=(10, 6))
+    for car in range(N):
+        plt.plot(time_array, cars[:, car, 0], label=f"Car {car} (Follower)", linestyle='-')
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Position (m)")
+    plt.title(f"Position of Cars in Platoon over Time (Without filters) ({SNR}db)")
+
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("fig/platoon_positions_filterless.png")
+
+
+    plt.figure(figsize=(10, 6))
+    for car in range(N):
+        plt.plot(time_array, cars[:, car, 1], label=f"Car {car} (Follower)", linestyle='-')
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Velocity (m/s)")
+    plt.title(f"Velocity of Cars in Platoon over Time (Without filters) ({SNR}db)")
+
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("fig/platoon_velocities_filterless.png")
+        
+
+    plt.figure(figsize=(10, 6))
+    for car in range(N):
+        plt.plot(time_array, cars[:, car, 2], label=f"Car {car} (Follower)", linestyle='-')
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Acceleration (m/s2)")
+    plt.title(f"Acceleration of Cars in Platoon over Time (Without filters) ({SNR}db)")
+
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("fig/platoon_accelerations_filterless.png")
+
+
 def make_graph_res(res, time_array):
     plt.figure(figsize=(14, 6))
 

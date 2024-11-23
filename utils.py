@@ -136,7 +136,7 @@ def get_matrices(N, K, B, H, I, C, tau):
             
 
     C_matrix = np.zeros((3*N, 1))
-    C_matrix[-1, 0] = 1 
+    C_matrix[-1, 0] = 1/tau[0] 
     
     A_matrix = np.block([
         [Z_NN, I_NN, Z_NN],
@@ -273,9 +273,9 @@ class ModifiedUIKF:
 
 
 class ModifiedUIKF_pwls:
-    def __init__(self, A, B, C, H, Q, R, P0, lambda_penalty=1.0, threshold=1.0):
+    def __init__(self, A, B, C, H, Q, R, P0):
         """
-        Initialize the Modified UIKF with PWLS.
+        Initialize the Modified UIKF.
         :param A: State transition matrix
         :param B: Control input matrix
         :param C: Unknown input matrix
@@ -283,8 +283,6 @@ class ModifiedUIKF_pwls:
         :param Q: Process noise covariance
         :param R: Measurement noise covariance
         :param P0: Initial error covariance
-        :param lambda_penalty: Regularization parameter for the PWLS
-        :param threshold: Threshold for residual to identify outliers
         """
         self.A = A
         self.B = B
@@ -293,8 +291,6 @@ class ModifiedUIKF_pwls:
         self.Q = Q
         self.R = R
         self.P = P0
-        self.lambda_penalty = lambda_penalty
-        self.threshold = threshold
 
     def predict(self, X, U):
         """
@@ -312,7 +308,7 @@ class ModifiedUIKF_pwls:
 
     def update(self, Z):
         """
-        Update the state estimate and unknown input, incorporating PWLS.
+        Update the state estimate and unknown input.
         :param Z: Noisy measurement vector
         :return: Updated state estimate and estimated unknown input
         """
@@ -330,30 +326,75 @@ class ModifiedUIKF_pwls:
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
 
-        # Update state estimate using the Kalman filter update rule
-        self.X_pred += K @ residual_adjusted
+        # Changes for PWLS
+        epsilon =  1e-5
+        lambda_val = 0.005
+
+        Z_bar = np.vstack((residual_adjusted, self.X_pred))
+        H_bar = np.vstack((self.H, self.H))
+
+        w_est = np.vstack((np.zeros(len(residual_adjusted)), np.ones(len(residual_adjusted))))
+        eps = 1
+        X_plus = self.X_pred.copy()
+        Sk = block_diag(self.R, self.P)
+        residual_new = Z_bar - H_bar @ X_plus
+
+        while eps > epsilon:
+            Z_adj = np.diag(w_est.flatten()) @ Z_bar
+            H_adj = np.diag(w_est.flatten()) @ H_bar
+
+            X_old = X_plus.copy()
+
+            Sk_inv = np.linalg.inv(Sk)
+            M = H_adj.T @ Sk_inv @ H_adj
+            X_plus = np.linalg.inv(M) @ (H_adj.T @ Sk_inv @ Z_adj)
+
+            residual_new = Z_bar - H_bar @ X_plus
+
+            w_est = np.maximum(np.minimum(np.sqrt(0.5 * lambda_val) / np.abs(residual_new), 1), 0)
+            eps = np.linalg.norm(X_old - X_plus, np.inf)
+
+        w_est[w_est < 0.5] = 0
+
+
+        Z_adj = np.dot(np.diag(w_est.flatten()), Z_bar)
+        H_adj = np.dot(np.diag(w_est.flatten()), H_bar)
+        M = H_adj.T @ np.linalg.inv(Sk) @ H_adj
+
+        M = M + np.eye(M.shape[0]) * 1e-6
+        # Update state estimate
+        self.X_pred = np.linalg.inv(M) @ (H_adj.T @ np.linalg.inv(Sk) @ Z_adj)
 
         # Add the effect of the estimated unknown input
         self.X_pred += self.C @ F_est
         
-        # Apply PWLS - Penalized Weighted Least Squares
-        # Check residual to adjust the weights
-        weights = np.ones_like(residual_adjusted)
-        for i in range(len(residual_adjusted)):
-            if np.abs(residual_adjusted[i]) > self.threshold:
-                weights[i] = 0.1  # Lower weight for suspected outliers
-            else:
-                weights[i] = 1.0  # Normal weight for reliable measurements
-        
-        # Apply the penalty term to the state update
-        penalty_term = self.lambda_penalty * np.sum(np.square(self.X_pred))  # Regularization
-        self.X_pred -= penalty_term  # Subtract regularization penalty
-
-        # Adjust the residuals using the weighted least squares
-        weighted_residual = weights * residual_adjusted
-        self.X_pred += K @ weighted_residual  # Correct the state estimate
-
         # Update error covariance
         self.P = (np.eye(len(self.P)) - K @ self.H) @ self.P
 
-        return self.X_pred, F_est
+        return self.X_pred, F_est, np.linalg.norm(residual_adjusted)
+    
+
+def noise_to_kalman_covariance(noise_db, matrix_type='R', state_dim=1):
+    """
+    Converts noise levels in dB to covariance matrices for a Kalman filter.
+    
+    Parameters:
+        noise_db (float or list of floats): Noise levels in decibels (dB).
+        matrix_type (str): Either 'R' for measurement noise or 'Q' for process noise.
+        state_dim (int): Dimensionality of the state/measurement vector.
+        
+    Returns:
+        np.ndarray: Covariance matrix for the specified noise level and type.
+    """
+    # Convert dB to linear noise power
+    noise_power = 10 ** (np.array(noise_db) / 10)
+    
+    # Define a scaling factor (adjust as needed based on the system)
+    scaling_factor = 0.00001 if matrix_type == 'R' else 0.0000001  # Example scaling factors
+    
+    # Compute covariance matrix
+    covariance_value = scaling_factor * noise_power
+    
+    # Create diagonal covariance matrix for the given state/measurement dimension
+    return np.diag([covariance_value] * state_dim)
+
